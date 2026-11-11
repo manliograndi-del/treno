@@ -225,6 +225,14 @@ class Scheda:
         if not t and self.tipo == "norma":
             t = " ".join(x for x in (self.get("tipo"), self.get("numero"), self.get("ente")) if x) or self.get("oggetto")[:90]
         if not t and self.corpi: t = self.corpi[0][0]
+        if not t and self.corpi:
+            m = re.search(r"^- (?:Nome|Titolo|Voce|Atto):\s*\"?(.+?)\"?(?:\. |\.?$)", self.corpi[0][1], re.M)
+            if m: t = m.group(1)[:110]
+            elif not self.corpi[0][1].startswith(("-", "(")):
+                f = re.split(r"\. |\s\(|;", self.corpi[0][1], maxsplit=1)[0].strip()
+                if 3 < len(f) <= 80: t = f
+        t = re.sub(r"^\(nuov[oi] slug\)\s*[–—-]\s*", "", t or "")
+        if len(t) > 120: t = t[:117].rsplit(" ", 1)[0] + "…"
         if not t:
             t = re.sub(r"^[a-z]+-", "", self.slug).replace("-", " ")
             t = t[:1].upper() + t[1:]
@@ -292,15 +300,36 @@ class Corpus:
                 self.scheda(slug, tipo).add(d, r.fid)
 
     def _load_corpi(self, r):
+        """Testi estesi: blocchi '### slug – Titolo' e blocchi che iniziano con una riga '**slug**'
+        (anche '**slug-a** e **slug-b**'). Un blocco finisce al titolo successivo o alla prossima
+        riga che inizia in grassetto."""
         lines = r.text.split("\n"); cur = None
+        BOLD = re.compile(r"^\*\*`?([a-z]+(?:-[a-z0-9]+)+)`?\*\*")
+        def chiudi():
+            if not cur: return
+            body = "\n".join(cur[2]).strip()
+            if not body: return
+            for slug in cur[0]:
+                if slug in self.schede or PREFISSO_TIPO.get(slug.split("-")[0]):
+                    self.scheda(slug, None).corpi.append((cur[1], body, r.fid))
         for ln in lines + ["## fine"]:
             m = re.match(r"^###\s+`?([a-z]+(?:-[a-z0-9]+)+)`?\s*(?:[–—:-]\s*(.*))?$", ln)
             if m or re.match(r"^#{1,3} ", ln):
-                if cur and cur[0] in self.schede or (cur and PREFISSO_TIPO.get(cur[0].split("-")[0])):
-                    s = self.scheda(cur[0], None)
-                    s.corpi.append((cur[1], "\n".join(cur[2]).strip(), r.fid))
-                cur = [m.group(1), (m.group(2) or "").strip(), []] if m else None
+                chiudi()
+                cur = [[m.group(1)], (m.group(2) or "").strip(), []] if m else None
                 continue
+            if ln.startswith("**"):
+                mb = BOLD.match(ln)
+                if mb or (cur and cur[3:] == ["bold"]):
+                    chiudi(); cur = None
+                if mb:
+                    slugs = re.findall(r"\*\*`?([a-z]+(?:-[a-z0-9]+)+)`?\*\*", ln)
+                    resto = re.sub(r"^(?:\*\*`?[a-z0-9-]+`?\*\*(?:\s*(?:e|,|ed)\s*)?)+", "", ln).strip()
+                    resto = re.sub(r"^[–—:-]\s*", "", resto)
+                    resto = re.sub(r"^\(nuov[oi] slug\)\s*[–—-]?\s*", "", resto)
+                    tit_ok = len(resto) < 120 and not resto.startswith("(")
+                    cur = [slugs, resto if tit_ok else "", [] if tit_ok or not resto else [resto], "bold"]
+                    continue
             if cur: cur[2].append(ln)
 
     def _load_01(self):
