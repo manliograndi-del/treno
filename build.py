@@ -102,6 +102,8 @@ PERIODI = [(1989, 1999, "Le origini"), (2000, 2004, "Accordi e primi presidi"), 
            (2007, 2010, "L'Osservatorio"), (2011, 2012, "La Maddalena"), (2013, 2019, "Scavi, TELT, costi-benefici"),
            (2020, 2026, "San Didero e la Maurienne")]
 MESI_L = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"]
+# slug nati da errori di estrazione nelle ricerche: non diventano schede
+ESCLUSI = {"persona-dei-gas-lacrimogeni"}
 SEGNAPOSTO_01 = {"1989-09-15", "1996-01-15", "2006-03-01", "2007-09-15", "2011-04-06", "2014-11-20", "2016-07-29", "2024-07-15"}
 
 esc = lambda s: html.escape(str(s or ""), quote=True)
@@ -296,7 +298,7 @@ class Corpus:
                 if tipo == "scaletta":
                     self.scheda(d["concerto_slug"], "concerto").scaletta.append(d); continue
                 slug = d.get("slug", "")
-                if not re.match(r"^[a-z]+(-[a-z0-9]+)+$", slug): continue
+                if not re.match(r"^[a-z]+(-[a-z0-9]+)+$", slug) or slug in ESCLUSI: continue
                 self.scheda(slug, tipo).add(d, r.fid)
 
     def _load_corpi(self, r):
@@ -310,7 +312,7 @@ class Corpus:
             body = "\n".join(cur[2]).strip()
             if not body: return
             for slug in cur[0]:
-                if slug in self.schede or PREFISSO_TIPO.get(slug.split("-")[0]):
+                if slug not in ESCLUSI and (slug in self.schede or PREFISSO_TIPO.get(slug.split("-")[0])):
                     self.scheda(slug, None).corpi.append((cur[1], body, r.fid))
         for ln in lines + ["## fine"]:
             m = re.match(r"^###\s+`?([a-z]+(?:-[a-z0-9]+)+)`?\s*(?:[–—:-]\s*(.*))?$", ln)
