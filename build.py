@@ -104,6 +104,38 @@ PERIODI = [(1989, 1999, "Le origini"), (2000, 2004, "Accordi e primi presidi"), 
 MESI_L = ["gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"]
 # slug nati da errori di estrazione nelle ricerche: non diventano schede
 ESCLUSI = {"persona-dei-gas-lacrimogeni"}
+# schede doppie (stesso oggetto, slug diversi): slug vecchio -> slug da usare.
+# Si aggiungono a quelli della sezione "Slug sostituiti" di ricerche/slug-usati.md.
+ALIAS_EXTRA = {
+    "doc-2012-convegno-26-aprile-programma": "documento-convegno-politecnico-26-aprile",
+    "doc-2018-ct-unione-montana-osservazioni": "doc-2018-unione-montana-osservazioni-variante",
+    "doc-2020-osservatorio-storia": "doc-2020-storia-osservatorio",
+    "doc-2026-anfp-comunicato-val-susa": "documento-2026-07-29-anfp-comunicato-val-susa",
+    "doc-2026-anfp-comunicato-valsusa": "documento-2026-07-29-anfp-comunicato-val-susa",
+    "doc-2012-giunti-et-al-ijees": "studio-2012-giunti-et-al-ijees-torino-lione",
+    "doc-giunti-2012-ijees": "studio-2012-giunti-et-al-ijees-torino-lione",
+}
+
+
+def carica_alias(ric):
+    alias = {}
+    f = ric / "slug-usati.md"
+    if f.exists():
+        sez = f.read_text(encoding="utf-8").split("## Slug sostituiti", 1)
+        if len(sez) == 2:
+            for ln in sez[1].split("\n"):
+                for parte in ln.lstrip("- ").split(";"):
+                    if "→" not in parte: continue
+                    a, b = parte.split("→", 1)
+                    nuovo = re.match(r"\s*`?([a-z]+(?:-[a-z0-9]+)+)", b)
+                    if not nuovo: continue
+                    for vecchio in re.findall(r"[a-z]+(?:-[a-z0-9]+)+", a):
+                        alias[vecchio] = nuovo.group(1)
+    alias.update(ALIAS_EXTRA)
+    return alias
+
+
+ALIAS = {}
 SEGNAPOSTO_01 = {"1989-09-15", "1996-01-15", "2006-03-01", "2007-09-15", "2011-04-06", "2014-11-20", "2016-07-29", "2024-07-15"}
 
 esc = lambda s: html.escape(str(s or ""), quote=True)
@@ -268,6 +300,7 @@ def data_it(d, prec=""):
 
 class Corpus:
     def __init__(self):
+        ALIAS.clear(); ALIAS.update(carica_alias(RIC))
         self.ricerche = [Ricerca(p) for p in sorted(RIC.glob("*.md"))
                          if not p.name.startswith("00-") and p.name != "slug-usati.md"]
         # le correzioni (01b, 02b) hanno la precedenza sulle versioni precedenti
@@ -283,6 +316,7 @@ class Corpus:
         self._sezioni()
 
     def scheda(self, slug, tipo):
+        slug = ALIAS.get(slug, slug)
         if tipo is None:
             tipo = PREFISSO_TIPO.get(slug.split("-")[0], "documento")
         if slug not in self.schede:
@@ -354,7 +388,7 @@ class Corpus:
                    "cifre": "" if re.match(r"(non applicabile|–|-)\.?$", c[5].lower()) else c[5], "attori": c[6], "fonti_md": c[7],
                    "affidabilita": c[8] if len(c) > 8 else ""}
             if nota_data: row["nota_data"] = nota_data
-            target = self.schede.get(ms.group(1)) if ms else None
+            target = self.schede.get(ALIAS.get(ms.group(1), ms.group(1))) if ms else None
             if not target and not ms:
                 target = self._match_evento(data, tit)
             if target:
@@ -443,7 +477,7 @@ class Render:
     def link_slugs(self, h, refs=None, fid=None, self_slug=None):
         parts = re.split(r"(<a\b.*?</a>|<[^>]+>)", h, flags=re.S)
         def rep(m):
-            s = m.group(1)
+            s = ALIAS.get(m.group(1), m.group(1))
             if s in self.c.schede and s != self_slug:
                 return f'<a class="sl" href="~/schede/{s}/">{esc(self.c.schede[s].titolo)}</a>'
             return s
@@ -662,7 +696,7 @@ class Sito:
         for s in self.c.eventi():
             d = s.data; p = d.split("-")
             luogo = s.get("luogo")
-            ls = s.get("luogo_slug")
+            ls = ALIAS.get(s.get("luogo_slug"), s.get("luogo_slug"))
             if ls in self.c.schede: luogo = self.c.schede[ls].titolo
             cat = [x.strip().capitalize() for x in re.split(r"[;,]", s.get("categoria")) if x.strip()][:3]
             dsc = s.descr[0][0] if s.descr else ""
@@ -682,8 +716,9 @@ class Sito:
         for s in self.c.schede.values():
             blob = " ".join(" ".join(r.values()) for r, _ in s.recs) + " ".join(b for _, b, _ in s.corpi)
             for m in SLUG_RE.finditer(blob):
-                if m.group(1) in self.c.schede and m.group(1) != s.slug:
-                    back[m.group(1)].add(s.slug)
+                t = ALIAS.get(m.group(1), m.group(1))
+                if t in self.c.schede and t != s.slug:
+                    back[t].add(s.slug)
         for s in self.c.schede.values():
             self.add(f"schede/{s.slug}/", s.titolo, (sorted(s.sez) or [""])[0], self.scheda_page(s, back[s.slug]))
 
